@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trivia Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 600px;
+            margin: auto;
+            background: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1, h2 {
+            color: #333;
+        }
+        #players, #question, #options {
+            margin-bottom: 20px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Trivia Game</h1>
+        <div id="gameArea">
+            <button id="joinGameBtn">Join Game</button>
+            <div id="waitingMessage"></div>
+            <div id="players"></div>
+            <div id="question"></div>
+            <div id="options"></div>
+            <button id="submitAnswer" style="display:none;">Submit Answer</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.3.2/socket.io.js"></script>
+    <script>
+        const socket = io('http://localhost:5000');
+        let currentRoomId = null;
+
+        const joinGameBtn = document.getElementById('joinGameBtn');
+        const waitingMessage = document.getElementById('waitingMessage');
+        const playersDiv = document.getElementById('players');
+        const questionDiv = document.getElementById('question');
+        const optionsDiv = document.getElementById('options');
+        const submitAnswerBtn = document.getElementById('submitAnswer');
+
+        joinGameBtn.addEventListener('click', () => {
+            const username = prompt('Enter your username:');
+            if (username) {
+                socket.emit('joinGame', username);
+                joinGameBtn.style.display = 'none';
+                waitingMessage.textContent = 'Waiting for another player...';
+            }
+        });
+
+        submitAnswerBtn.addEventListener('click', () => {
+            const selectedOption = document.querySelector('input[name="answer"]:checked');
+            if (selectedOption) {
+                socket.emit('submitAnswer', { roomId: currentRoomId, answer: parseInt(selectedOption.value) });
+                submitAnswerBtn.disabled = true;
+                waitingMessage.textContent = 'Waiting for other player to answer...';
+            } else {
+                alert('Please select an answer!');
+            }
+        });
+
+        socket.on('gameJoined', (roomId) => {
+            currentRoomId = roomId;
+            console.log(`Joined room ${roomId}`);
+        });
+
+        socket.on('playerJoined', (username) => {
+            waitingMessage.textContent = `${username} joined. Game is starting...`;
+        });
+
+        socket.on('gameStart', ({ players, questionCount }) => {
+            waitingMessage.textContent = 'Game started!';
+            updatePlayers(players);
+        });
+
+        socket.on('nextQuestion', ({ question, options, questionNumber, totalQuestions }) => {
+            displayQuestion(question, options, questionNumber, totalQuestions);
+            submitAnswerBtn.disabled = false;
+            submitAnswerBtn.style.display = 'block';
+            waitingMessage.textContent = '';
+        });
+
+        socket.on('scoreUpdate', (players) => {
+            updatePlayers(players);
+        });
+
+        socket.on('gameOver', (players) => {
+            const winner = players.reduce((prev, current) => (prev.score > current.score) ? prev : current);
+            questionDiv.textContent = 'Game Over!';
+            optionsDiv.innerHTML = '';
+            submitAnswerBtn.style.display = 'none';
+            waitingMessage.textContent = `The winner is ${winner.username} with a score of ${winner.score}!`;
+            joinGameBtn.style.display = 'block';
+        });
+
+        socket.on('playerLeft', (username) => {
+            alert(`${username} left the game. The game will end.`);
+            resetGame();
+        });
+
+        function updatePlayers(players) {
+            playersDiv.innerHTML = '<h2>Players:</h2>' + players.map(p => `<p>${p.username}: ${p.score}</p>`).join('');
+        }
+
+        function displayQuestion(question, options, questionNumber, totalQuestions) {
+            questionDiv.innerHTML = `<h2>Question ${questionNumber} of ${totalQuestions}</h2><p>${question}</p>`;
+            optionsDiv.innerHTML = options.map((option, index) => `
+                <div>
+                    <input type="radio" id="option${index}" name="answer" value="${index}">
+                    <label for="option${index}">${option}</label>
+                </div>
+            `).join('');
+        }
+
+        function resetGame() {
+            currentRoomId = null;
+            playersDiv.innerHTML = '';
+            questionDiv.innerHTML = '';
+            optionsDiv.innerHTML = '';
+            submitAnswerBtn.style.display = 'none';
+            waitingMessage.textContent = '';
+            joinGameBtn.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
