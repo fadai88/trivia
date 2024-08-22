@@ -200,49 +200,63 @@ async function startGame(roomId) {
 }
 
 function startNextQuestion(roomId) {
-    const room = gameRooms.get(roomId);
-    if (!room) {
-        console.log(`Room ${roomId} not found when trying to start next question`);
-        return;
-    }
+  const room = gameRooms.get(roomId);
+  if (!room) {
+      console.log(`Room ${roomId} not found when trying to start next question`);
+      return;
+  }
 
-    const currentQuestion = room.questions[room.currentQuestionIndex];
-    const questionStartTime = moment();
+  const currentQuestion = room.questions[room.currentQuestionIndex];
+  const questionStartTime = moment();
 
-    io.to(roomId).emit('nextQuestion', {
-        question: currentQuestion.question,
-        options: currentQuestion.options,
-        questionNumber: room.currentQuestionIndex + 1,
-        totalQuestions: room.questions.length,
-        questionStartTime: questionStartTime.valueOf()
-    });
+  io.to(roomId).emit('nextQuestion', {
+      question: currentQuestion.question,
+      options: currentQuestion.options,
+      questionNumber: room.currentQuestionIndex + 1,
+      totalQuestions: room.questions.length,
+      questionStartTime: questionStartTime.valueOf()
+  });
 
-    room.questionStartTime = questionStartTime;
-    room.answersReceived = 0;
+  room.questionStartTime = questionStartTime;
+  room.answersReceived = 0;
 
-    setTimeout(() => {
-        completeQuestion(roomId);
-    }, 10000); // 10 seconds for each question
+  // Clear any existing timeout
+  if (room.questionTimeout) {
+      clearTimeout(room.questionTimeout);
+  }
+
+  // Set a new timeout for this question
+  room.questionTimeout = setTimeout(() => {
+      completeQuestion(roomId);
+  }, 10000); // 30 seconds for each question
 }
 
 function completeQuestion(roomId) {
-    const room = gameRooms.get(roomId);
-    if (!room) {
-        console.log(`Room ${roomId} not found when trying to complete question`);
-        return;
-    }
+  const room = gameRooms.get(roomId);
+  if (!room) {
+      console.log(`Room ${roomId} not found when trying to complete question`);
+      return;
+  }
 
-    io.to(roomId).emit('scoreUpdate', room.players.map(p => ({ username: p.username, score: p.score })));
-    room.currentQuestionIndex += 1;
-    room.answersReceived = 0;
+  // Clear the question timeout
+  if (room.questionTimeout) {
+      clearTimeout(room.questionTimeout);
+  }
 
-    if (room.currentQuestionIndex < room.questions.length) {
-        startNextQuestion(roomId);
-    } else {
-        console.log(`Game over in room ${roomId}`);
-        io.to(roomId).emit('gameOver', room.players.map(p => ({ username: p.username, score: p.score })));
-        gameRooms.delete(roomId);
-    }
+  io.to(roomId).emit('scoreUpdate', room.players.map(p => ({ username: p.username, score: p.score })));
+  room.currentQuestionIndex += 1;
+  room.answersReceived = 0;
+
+  if (room.currentQuestionIndex < room.questions.length) {
+      // Add a small delay before starting the next question
+      setTimeout(() => {
+          startNextQuestion(roomId);
+      }, 1000);
+  } else {
+      console.log(`Game over in room ${roomId}`);
+      io.to(roomId).emit('gameOver', room.players.map(p => ({ username: p.username, score: p.score })));
+      gameRooms.delete(roomId);
+  }
 }
 
 const PORT = process.env.PORT || 5000;

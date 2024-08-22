@@ -68,6 +68,7 @@
         const socket = io('http://localhost:5000');
         let currentRoomId = null;
         let questionStartTime;
+        let questionTimer;
 
         const joinGameBtn = document.getElementById('joinGameBtn');
         const waitingMessage = document.getElementById('waitingMessage');
@@ -116,15 +117,32 @@
         });
 
         socket.on('nextQuestion', ({ question, options, questionNumber, totalQuestions, questionStartTime: qStartTime }) => {
-            questionStartTime = qStartTime;
-            displayQuestion(question, options, questionNumber, totalQuestions, questionStartTime);
+            questionStartTime = parseInt(qStartTime);
+            displayQuestion(question, options, questionNumber, totalQuestions);
             submitAnswerBtn.disabled = false;
             submitAnswerBtn.style.display = 'block';
             waitingMessage.textContent = '';
+            
+            // Clear any existing timer
+            if (questionTimer) {
+                clearTimeout(questionTimer);
+            }
+            
+            // Set a new timer for this question
+            questionTimer = setTimeout(() => {
+                submitAnswerBtn.disabled = true;
+                waitingMessage.textContent = 'Time\'s up!';
+            }, 10000);
+            
+            startCountdown(questionStartTime);
         });
 
         socket.on('scoreUpdate', (players) => {
             updatePlayers(players);
+            // Clear the question timer when scores are updated
+            if (questionTimer) {
+                clearTimeout(questionTimer);
+            }
         });
 
         socket.on('gameOver', (players) => {
@@ -136,6 +154,10 @@
             joinGameBtn.style.display = 'block';
             clearInterval(countdownInterval);
             countdownTimer.style.display = 'none';
+            if (questionTimer) {
+                clearTimeout(questionTimer);
+            }
+                clearInterval(countdownInterval);
         });
 
         socket.on('playerLeft', (username) => {
