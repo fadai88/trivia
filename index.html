@@ -26,6 +26,11 @@
         #players, #question, #options {
             margin-bottom: 20px;
         }
+        #countdownTimer {
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+        }
         button {
             background-color: #4CAF50;
             color: white;
@@ -46,6 +51,7 @@
 <body>
     <div class="container">
         <h1>Trivia Game</h1>
+        <div id="countdownTimer"></div>
         <div id="gameArea">
             <button id="joinGameBtn">Join Game</button>
             <div id="waitingMessage"></div>
@@ -57,9 +63,11 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.3.2/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
     <script>
         const socket = io('http://localhost:5000');
         let currentRoomId = null;
+        let questionStartTime;
 
         const joinGameBtn = document.getElementById('joinGameBtn');
         const waitingMessage = document.getElementById('waitingMessage');
@@ -67,6 +75,9 @@
         const questionDiv = document.getElementById('question');
         const optionsDiv = document.getElementById('options');
         const submitAnswerBtn = document.getElementById('submitAnswer');
+        const countdownTimer = document.getElementById('countdownTimer');
+
+        let countdownInterval;
 
         joinGameBtn.addEventListener('click', () => {
             const username = prompt('Enter your username:');
@@ -80,13 +91,15 @@
         submitAnswerBtn.addEventListener('click', () => {
             const selectedOption = document.querySelector('input[name="answer"]:checked');
             if (selectedOption) {
-                socket.emit('submitAnswer', { roomId: currentRoomId, answer: parseInt(selectedOption.value) });
+                const responseTime = moment().diff(moment(questionStartTime), 'milliseconds');
+                socket.emit('submitAnswer', { roomId: currentRoomId, answer: parseInt(selectedOption.value), responseTime });
                 submitAnswerBtn.disabled = true;
                 waitingMessage.textContent = 'Waiting for other player to answer...';
             } else {
                 alert('Please select an answer!');
             }
         });
+
 
         socket.on('gameJoined', (roomId) => {
             currentRoomId = roomId;
@@ -102,8 +115,9 @@
             updatePlayers(players);
         });
 
-        socket.on('nextQuestion', ({ question, options, questionNumber, totalQuestions }) => {
-            displayQuestion(question, options, questionNumber, totalQuestions);
+        socket.on('nextQuestion', ({ question, options, questionNumber, totalQuestions, questionStartTime: qStartTime }) => {
+            questionStartTime = qStartTime;
+            displayQuestion(question, options, questionNumber, totalQuestions, questionStartTime);
             submitAnswerBtn.disabled = false;
             submitAnswerBtn.style.display = 'block';
             waitingMessage.textContent = '';
@@ -120,6 +134,8 @@
             submitAnswerBtn.style.display = 'none';
             waitingMessage.textContent = `The winner is ${winner.username} with a score of ${winner.score}!`;
             joinGameBtn.style.display = 'block';
+            clearInterval(countdownInterval);
+            countdownTimer.style.display = 'none';
         });
 
         socket.on('playerLeft', (username) => {
@@ -127,11 +143,7 @@
             resetGame();
         });
 
-        function updatePlayers(players) {
-            playersDiv.innerHTML = '<h2>Players:</h2>' + players.map(p => `<p>${p.username}: ${p.score}</p>`).join('');
-        }
-
-        function displayQuestion(question, options, questionNumber, totalQuestions) {
+        function displayQuestion(question, options, questionNumber, totalQuestions, questionStartTime) {
             questionDiv.innerHTML = `<h2>Question ${questionNumber} of ${totalQuestions}</h2><p>${question}</p>`;
             optionsDiv.innerHTML = options.map((option, index) => `
                 <div>
@@ -139,6 +151,31 @@
                     <label for="option${index}">${option}</label>
                 </div>
             `).join('');
+
+            startCountdown(questionStartTime);
+        }
+
+        function startCountdown(qStartTime) {
+            const duration = 10; // 30 seconds
+
+            clearInterval(countdownInterval);
+
+            countdownInterval = setInterval(() => {
+                const timeRemaining = duration - moment().diff(moment(qStartTime), 'seconds');
+                countdownTimer.textContent = `Time remaining: ${timeRemaining} seconds`;
+
+                if (timeRemaining <= 0) {
+                    clearInterval(countdownInterval);
+                    countdownTimer.textContent = "Time's up!";
+                    submitAnswerBtn.disabled = true;
+                }
+            }, 1000);
+
+            countdownTimer.style.display = 'block';
+        }
+
+        function updatePlayers(players) {
+            playersDiv.innerHTML = '<h2>Players:</h2>' + players.map(p => `<p>${p.username}: ${p.score}</p>`).join('');
         }
 
         function resetGame() {
@@ -149,6 +186,8 @@
             submitAnswerBtn.style.display = 'none';
             waitingMessage.textContent = '';
             joinGameBtn.style.display = 'block';
+            clearInterval(countdownInterval);
+            countdownTimer.style.display = 'none';
         }
     </script>
 </body>
