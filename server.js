@@ -214,7 +214,8 @@ function startNextQuestion(roomId) {
       options: currentQuestion.options,
       questionNumber: room.currentQuestionIndex + 1,
       totalQuestions: room.questions.length,
-      questionStartTime: questionStartTime.valueOf()
+      questionStartTime: questionStartTime.valueOf(),
+      correctAnswerIndex: currentQuestion.correctAnswer
   });
 
   room.questionStartTime = questionStartTime;

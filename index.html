@@ -5,50 +5,112 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trivia Game</title>
     <style>
+        :root {
+            --bg-color: #f4f4f4;
+            --text-color: #333;
+            --container-bg: white;
+            --button-bg: #4CAF50;
+            --button-hover: #45a049;
+            --button-disabled: #cccccc;
+        }
+
         body {
             font-family: Arial, sans-serif;
             line-height: 1.6;
             margin: 0;
             padding: 20px;
-            background-color: #f4f4f4;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s, color 0.3s;
         }
+
         .container {
             max-width: 600px;
             margin: auto;
-            background: white;
+            background: var(--container-bg);
             padding: 20px;
             border-radius: 5px;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            transition: background-color 0.3s;
         }
+
         h1, h2 {
-            color: #333;
+            color: var(--text-color);
         }
+
         #players, #question, #options {
             margin-bottom: 20px;
         }
+
         #countdownTimer {
             font-size: 1.2rem;
             font-weight: bold;
             margin-bottom: 1rem;
         }
+
         button {
-            background-color: #4CAF50;
+            background-color: var(--button-bg);
             color: white;
             padding: 10px 15px;
             border: none;
             border-radius: 4px;
             cursor: pointer;
+            transition: background-color 0.3s;
         }
+
         button:hover {
-            background-color: #45a049;
+            background-color: var(--button-hover);
         }
+
         button:disabled {
-            background-color: #cccccc;
+            background-color: var(--button-disabled);
             cursor: not-allowed;
+        }
+
+        .theme-toggle {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 5px 10px;
+            background-color: #333;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        @keyframes correct {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); background-color: #4CAF50; }
+            100% { transform: scale(1); }
+        }
+
+        @keyframes incorrect {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); background-color: #f44336; }
+            100% { transform: scale(1); }
+        }
+
+        .correct {
+            animation: correct 0.5s ease-in-out;
+        }
+
+        .incorrect {
+            animation: incorrect 0.5s ease-in-out;
+        }
+
+        .dark-theme {
+            --bg-color: #333;
+            --text-color: #f4f4f4;
+            --container-bg: #444;
+            --button-bg: #4CAF50;
+            --button-hover: #45a049;
+            --button-disabled: #666;
         }
     </style>
 </head>
 <body>
+    <button class="theme-toggle" onclick="toggleTheme()">Toggle Theme</button>
     <div class="container">
         <h1>Trivia Game</h1>
         <div id="countdownTimer"></div>
@@ -69,6 +131,7 @@
         let currentRoomId = null;
         let questionStartTime;
         let questionTimer;
+        let correctAnswer;
 
         const joinGameBtn = document.getElementById('joinGameBtn');
         const waitingMessage = document.getElementById('waitingMessage');
@@ -93,14 +156,22 @@
             const selectedOption = document.querySelector('input[name="answer"]:checked');
             if (selectedOption) {
                 const responseTime = moment().diff(moment(questionStartTime), 'milliseconds');
-                socket.emit('submitAnswer', { roomId: currentRoomId, answer: parseInt(selectedOption.value), responseTime });
+                const selectedAnswer = parseInt(selectedOption.value);
+                socket.emit('submitAnswer', { roomId: currentRoomId, answer: selectedAnswer, responseTime });
                 submitAnswerBtn.disabled = true;
                 waitingMessage.textContent = 'Waiting for other player to answer...';
+                
+                // Animate correct/incorrect answer
+                if (selectedAnswer === correctAnswer) {
+                    selectedOption.parentElement.classList.add('correct');
+                } else {
+                    selectedOption.parentElement.classList.add('incorrect');
+                    document.querySelector(`input[value="${correctAnswer}"]`).parentElement.classList.add('correct');
+                }
             } else {
                 alert('Please select an answer!');
             }
         });
-
 
         socket.on('gameJoined', (roomId) => {
             currentRoomId = roomId;
@@ -116,19 +187,18 @@
             updatePlayers(players);
         });
 
-        socket.on('nextQuestion', ({ question, options, questionNumber, totalQuestions, questionStartTime: qStartTime }) => {
+        socket.on('nextQuestion', ({ question, options, questionNumber, totalQuestions, questionStartTime: qStartTime, correctAnswerIndex }) => {
             questionStartTime = parseInt(qStartTime);
+            correctAnswer = correctAnswerIndex; // Store the correct answer index
             displayQuestion(question, options, questionNumber, totalQuestions);
             submitAnswerBtn.disabled = false;
             submitAnswerBtn.style.display = 'block';
             waitingMessage.textContent = '';
             
-            // Clear any existing timer
             if (questionTimer) {
                 clearTimeout(questionTimer);
             }
             
-            // Set a new timer for this question
             questionTimer = setTimeout(() => {
                 submitAnswerBtn.disabled = true;
                 waitingMessage.textContent = 'Time\'s up!';
@@ -139,7 +209,6 @@
 
         socket.on('scoreUpdate', (players) => {
             updatePlayers(players);
-            // Clear the question timer when scores are updated
             if (questionTimer) {
                 clearTimeout(questionTimer);
             }
@@ -157,7 +226,7 @@
             if (questionTimer) {
                 clearTimeout(questionTimer);
             }
-                clearInterval(countdownInterval);
+            clearInterval(countdownInterval);
         });
 
         socket.on('playerLeft', (username) => {
@@ -165,7 +234,7 @@
             resetGame();
         });
 
-        function displayQuestion(question, options, questionNumber, totalQuestions, questionStartTime) {
+        function displayQuestion(question, options, questionNumber, totalQuestions) {
             questionDiv.innerHTML = `<h2>Question ${questionNumber} of ${totalQuestions}</h2><p>${question}</p>`;
             optionsDiv.innerHTML = options.map((option, index) => `
                 <div>
@@ -174,11 +243,10 @@
                 </div>
             `).join('');
 
-            startCountdown(questionStartTime);
         }
 
         function startCountdown(qStartTime) {
-            const duration = 10; // 30 seconds
+            const duration = 10; // 10 seconds
 
             clearInterval(countdownInterval);
 
@@ -210,6 +278,10 @@
             joinGameBtn.style.display = 'block';
             clearInterval(countdownInterval);
             countdownTimer.style.display = 'none';
+        }
+
+        function toggleTheme() {
+            document.body.classList.toggle('dark-theme');
         }
     </script>
 </body>
