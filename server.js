@@ -19,64 +19,14 @@ app.use(cors());
 app.use(express.json());
 
 mongoose.connect(process.env.MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
-    .then(() => {
-        console.log('Connected to MongoDB');
-        insertSampleQuestions();
-    })
+    .then(() => console.log('Connected to MongoDB'))
     .catch(err => console.error('Could not connect to MongoDB', err));
 
-const Quiz = mongoose.model('Quiz', new mongoose.Schema({
-    question: String,
-    options: [String],
-    correctAnswer: Number
-}));
-
-async function insertSampleQuestions() {
-    try {
-        const count = await Quiz.countDocuments();
-        if (count === 0) {
-          const sampleQuestions = [
-            {
-              question: "What is the capital of France?",
-              options: ["London", "Berlin", "Paris", "Madrid"],
-              correctAnswer: 2
-            },
-            {
-              question: "Which planet is known as the Red Planet?",
-              options: ["Venus", "Mars", "Jupiter", "Saturn"],
-              correctAnswer: 1
-            },
-            {
-              question: "What is 2 + 2?",
-              options: ["3", "4", "5", "6"],
-              correctAnswer: 1
-            },
-            {
-              question: "Who painted the Mona Lisa?",
-              options: ["Van Gogh", "Da Vinci", "Picasso", "Rembrandt"],
-              correctAnswer: 1
-            },
-            {
-              question: "What is the largest ocean on Earth?",
-              options: ["Atlantic", "Indian", "Arctic", "Pacific"],
-              correctAnswer: 3
-            },
-            {
-              question: "Which country is home to the kangaroo?",
-              options: ["New Zealand", "South Africa", "Australia", "Brazil"],
-              correctAnswer: 2
-            }
-          ];
-
-            await Quiz.insertMany(sampleQuestions);
-            console.log('Sample questions inserted successfully');
-        } else {
-            console.log('Questions already exist in the database');
-        }
-    } catch (error) {
-        console.error('Error inserting sample questions:', error);
-    }
-}
+    const Quiz = mongoose.model('Quiz', new mongoose.Schema({
+        question: String,
+        options: [String],
+        correctAnswer: Number
+    }));
 
 const gameRooms = new Map();
 
@@ -189,7 +139,8 @@ async function startGame(roomId) {
     }
 
     try {
-        room.questions = await Quiz.aggregate([{ $sample: { size: 4 } }]);
+        // Fetch 4 random questions from MongoDB
+        room.questions = await Quiz.aggregate([{ $sample: { size: 7 } }]);
         console.log(`Fetched ${room.questions.length} questions for room ${roomId}`);
         io.to(roomId).emit('gameStart', { players: room.players, questionCount: room.questions.length });
         startNextQuestion(roomId);
