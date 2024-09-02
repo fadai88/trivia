@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
 const moment = require('moment');
+const User = require('./models/User'); // Import the User model
 
 const app = express();
 const server = http.createServer(app);
@@ -22,92 +23,120 @@ mongoose.connect(process.env.MONGODB_URI, { useNewUrlParser: true, useUnifiedTop
     .then(() => console.log('Connected to MongoDB'))
     .catch(err => console.error('Could not connect to MongoDB', err));
 
-    const Quiz = mongoose.model('Quiz', new mongoose.Schema({
-        question: String,
-        options: [String],
-        correctAnswer: Number
-    }));
+const Quiz = mongoose.model('Quiz', new mongoose.Schema({
+    question: String,
+    options: [String],
+    correctAnswer: Number
+}));
 
 const gameRooms = new Map();
 
 io.on('connection', (socket) => {
     console.log('New client connected:', socket.id);
 
+    socket.on('register', async ({ username, email, password }) => {
+        try {
+            const user = new User({ username, email, password });
+            await user.save();
+            socket.emit('registrationSuccess');
+        } catch (error) {
+            socket.emit('registrationFailure', error.message);
+        }
+    });
+
+    socket.on('login', async ({ username, password }) => {
+        try {
+            const user = await User.findOne({ username });
+            if (user && await user.matchPassword(password)) {
+                socket.emit('loginSuccess', username);
+            } else {
+                socket.emit('loginFailure', 'Invalid username or password');
+            }
+        } catch (error) {
+            socket.emit('loginFailure', error.message);
+        }
+    });
+
     socket.on('joinGame', (username) => {
-      console.log(`${username} (${socket.id}) is trying to join a game`);
-      let roomId;
-      let joinedExistingRoom = false;
+        if (!username) {
+            socket.emit('joinGameFailure', 'You must be logged in to join the game.');
+            return;
+        }
 
-      for (const [id, room] of gameRooms.entries()) {
-          if (room.players.length < 2) {
-              roomId = id;
-              joinedExistingRoom = true;
-              break;
-          }
-      }
+        console.log(`${username} (${socket.id}) is trying to join a game`);
+        let roomId;
+        let joinedExistingRoom = false;
 
-      if (!roomId) {
-          roomId = Math.random().toString(36).substring(7);
-          gameRooms.set(roomId, { 
-              players: [], 
-              questions: [], 
-              currentQuestionIndex: 0,
-              answersReceived: 0
-          });
-          console.log(`Created new room: ${roomId}`);
-      }
+        for (const [id, room] of gameRooms.entries()) {
+            if (room.players.length < 2) {
+                roomId = id;
+                joinedExistingRoom = true;
+                break;
+            }
+        }
 
-      const room = gameRooms.get(roomId);
-      room.players.push({ id: socket.id, username, score: 0 });
+        if (!roomId) {
+            roomId = Math.random().toString(36).substring(7);
+            gameRooms.set(roomId, { 
+                players: [], 
+                questions: [], 
+                currentQuestionIndex: 0,
+                answersReceived: 0
+            });
+            console.log(`Created new room: ${roomId}`);
+        }
 
-      socket.join(roomId);
-      socket.emit('gameJoined', roomId);
+        const room = gameRooms.get(roomId);
+        room.players.push({ id: socket.id, username, score: 0 });
 
-      console.log(`Player ${username} (${socket.id}) joined room ${roomId}`);
-      console.log(`Room ${roomId} now has ${room.players.length} player(s)`);
+        socket.join(roomId);
+        socket.emit('gameJoined', roomId);
 
-      if (room.players.length === 2) {
-          console.log(`Starting game in room ${roomId}`);
-          startGame(roomId);
-      } else if (joinedExistingRoom) {
-          console.log(`Notifying other player in room ${roomId} that ${username} joined`);
-          socket.to(roomId).emit('playerJoined', username);
-      }
-  });
+        console.log(`Player ${username} (${socket.id}) joined room ${roomId}`);
+        console.log(`Room ${roomId} now has ${room.players.length} player(s)`);
 
-  socket.on('submitAnswer', ({ roomId, answer, responseTime }) => {
-      console.log(`Answer submitted by ${socket.id} in room ${roomId}: answer ${answer}, response time ${responseTime} ms`);
-      const room = gameRooms.get(roomId);
-      if (!room) {
-          console.log(`Room ${roomId} not found`);
-          return;
-      }
+        if (room.players.length === 2) {
+            console.log(`Starting game in room ${roomId}`);
+            startGame(roomId);
+        } else if (joinedExistingRoom) {
+            console.log(`Notifying other player in room ${roomId} that ${username} joined`);
+            socket.to(roomId).emit('playerJoined', username);
+        }
+    });
 
-      const player = room.players.find(p => p.id === socket.id);
-      if (!player) {
-          console.log(`Player ${socket.id} not found in room ${roomId}`);
-          return;
-      }
+    socket.on('submitAnswer', ({ roomId, answer, responseTime }) => {
+        console.log(`Answer submitted by ${socket.id} in room ${roomId}: answer ${answer}, response time ${responseTime} ms`);
+        const room = gameRooms.get(roomId);
+        if (!room) {
+            console.log(`Room ${roomId} not found`);
+            return;
+        }
 
-      const question = room.questions[room.currentQuestionIndex];
-      if (!question) {
-          console.log(`Question ${room.currentQuestionIndex} not found in room ${roomId}`);
-          return;
-      }
+        const player = room.players.find(p => p.id === socket.id);
+        if (!player) {
+            console.log(`Player ${socket.id} not found in room ${roomId}`);
+            return;
+        }
 
-      if (answer === question.correctAnswer) {
-          // Award points based on response time
-          const points = Math.max(10 - Math.floor(responseTime / 1000), 1);
-          player.score += points;
-          console.log(`Player ${player.username} scored ${points} points, new score: ${player.score}`);
-      }
+        const question = room.questions[room.currentQuestionIndex];
+        if (!question) {
+            console.log(`Question ${room.currentQuestionIndex} not found in room ${roomId}`);
+            return;
+        }
 
-      room.answersReceived += 1;
+        if (answer === question.correctAnswer) {
+            // Award points based on response time
+            const points = Math.max(10 - Math.floor(responseTime / 1000), 1);
+            player.score += points;
+            console.log(`Player ${player.username} scored ${points} points, new score: ${player.score}`);
+        }
 
-      if (room.answersReceived === room.players.length) {
-          completeQuestion(roomId);
-      }
-  });
+        room.answersReceived += 1;
+
+        if (room.answersReceived === room.players.length) {
+            completeQuestion(roomId);
+        }
+    });
 
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
@@ -151,66 +180,65 @@ async function startGame(roomId) {
 }
 
 function startNextQuestion(roomId) {
-  const room = gameRooms.get(roomId);
-  if (!room) {
-      console.log(`Room ${roomId} not found when trying to start next question`);
-      return;
-  }
+    const room = gameRooms.get(roomId);
+    if (!room) {
+        console.log(`Room ${roomId} not found when trying to start next question`);
+        return;
+    }
 
-  const currentQuestion = room.questions[room.currentQuestionIndex];
-  const questionStartTime = moment();
+    const currentQuestion = room.questions[room.currentQuestionIndex];
+    const questionStartTime = moment();
 
-  io.to(roomId).emit('nextQuestion', {
-      question: currentQuestion.question,
-      options: currentQuestion.options,
-      questionNumber: room.currentQuestionIndex + 1,
-      totalQuestions: room.questions.length,
-      questionStartTime: questionStartTime.valueOf(),
-      correctAnswerIndex: currentQuestion.correctAnswer
-  });
+    io.to(roomId).emit('nextQuestion', {
+        question: currentQuestion.question,
+        options: currentQuestion.options,
+        questionNumber: room.currentQuestionIndex + 1,
+        totalQuestions: room.questions.length,
+        questionStartTime: questionStartTime.valueOf(),
+        correctAnswerIndex: currentQuestion.correctAnswer
+    });
 
-  room.questionStartTime = questionStartTime;
-  room.answersReceived = 0;
+    room.questionStartTime = questionStartTime;
+    room.answersReceived = 0;
 
-  // Clear any existing timeout
-  if (room.questionTimeout) {
-      clearTimeout(room.questionTimeout);
-  }
+    // Clear any existing timeout
+    if (room.questionTimeout) {
+        clearTimeout(room.questionTimeout);
+    }
 
-  // Set a new timeout for this question
-  room.questionTimeout = setTimeout(() => {
-      completeQuestion(roomId);
-  }, 10000); // 30 seconds for each question
+    // Set a new timeout for this question
+    room.questionTimeout = setTimeout(() => {
+        completeQuestion(roomId);
+    }, 10000); // 30 seconds for each question
 }
 
 function completeQuestion(roomId) {
-  const room = gameRooms.get(roomId);
-  if (!room) {
-      console.log(`Room ${roomId} not found when trying to complete question`);
-      return;
-  }
+    const room = gameRooms.get(roomId);
+    if (!room) {
+        console.log(`Room ${roomId} not found when trying to complete question`);
+        return;
+    }
 
-  // Clear the question timeout
-  if (room.questionTimeout) {
-      clearTimeout(room.questionTimeout);
-  }
+    // Clear the question timeout
+    if (room.questionTimeout) {
+        clearTimeout(room.questionTimeout);
+    }
 
-  io.to(roomId).emit('scoreUpdate', room.players.map(p => ({ username: p.username, score: p.score })));
-  room.currentQuestionIndex += 1;
-  room.answersReceived = 0;
+    io.to(roomId).emit('scoreUpdate', room.players.map(p => ({ username: p.username, score: p.score })));
+    room.currentQuestionIndex += 1;
+    room.answersReceived = 0;
 
-  if (room.currentQuestionIndex < room.questions.length) {
-      // Add a small delay before starting the next question
-      setTimeout(() => {
-          startNextQuestion(roomId);
-      }, 1000);
-  } else {
-      console.log(`Game over in room ${roomId}`);
-      io.to(roomId).emit('gameOver', room.players.map(p => ({ username: p.username, score: p.score })));
-      gameRooms.delete(roomId);
-  }
+    if (room.currentQuestionIndex < room.questions.length) {
+        // Add a small delay before starting the next question
+        setTimeout(() => {
+            startNextQuestion(roomId);
+        }, 1000);
+    } else {
+        console.log(`Game over in room ${roomId}`);
+        io.to(roomId).emit('gameOver', room.players.map(p => ({ username: p.username, score: p.score })));
+        gameRooms.delete(roomId);
+    }
 }
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
