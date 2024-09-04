@@ -57,10 +57,16 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('joinGame', (username) => {
+    socket.on('joinGame', async (username) => {
         if (!username) {
             socket.emit('joinGameFailure', 'You must be logged in to join the game.');
             return;
+        }
+
+        try {
+            await User.findOneAndUpdate({ username }, { $inc: { gamesPlayed: 1 } });
+        } catch (error) {
+            console.error('Error updating games played:', error);
         }
 
         console.log(`${username} (${socket.id}) is trying to join a game`);
@@ -104,37 +110,52 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('submitAnswer', ({ roomId, answer, responseTime }) => {
-        console.log(`Answer submitted by ${socket.id} in room ${roomId}: answer ${answer}, response time ${responseTime} ms`);
+    socket.on('submitAnswer', async ({ roomId, answer, responseTime, username }) => {
         const room = gameRooms.get(roomId);
-        if (!room) {
-            console.log(`Room ${roomId} not found`);
-            return;
+        if (!room) return;
+
+        const player = room.players.find(p => p.username === username);
+        if (!player) return;
+
+        const currentQuestion = room.questions[room.currentQuestionIndex];
+        const isCorrect = answer === currentQuestion.correctAnswer;
+
+        if (isCorrect) {
+            player.score += 1;
+            try {
+                await User.findOneAndUpdate(
+                    { username },
+                    { 
+                        $inc: { 
+                            correctAnswers: 1,
+                            totalPoints: 1
+                        } 
+                    }
+                );
+            } catch (error) {
+                console.error('Error updating user stats:', error);
+            }
         }
 
-        const player = room.players.find(p => p.id === socket.id);
-        if (!player) {
-            console.log(`Player ${socket.id} not found in room ${roomId}`);
-            return;
-        }
+        player.answered = true;
 
-        const question = room.questions[room.currentQuestionIndex];
-        if (!question) {
-            console.log(`Question ${room.currentQuestionIndex} not found in room ${roomId}`);
-            return;
-        }
-
-        if (answer === question.correctAnswer) {
-            // Award points based on response time
-            const points = Math.max(10 - Math.floor(responseTime / 1000), 1);
-            player.score += points;
-            console.log(`Player ${player.username} scored ${points} points, new score: ${player.score}`);
-        }
-
-        room.answersReceived += 1;
-
-        if (room.answersReceived === room.players.length) {
+        if (room.players.every(p => p.answered)) {
             completeQuestion(roomId);
+        } else {
+            // Emit an event to update scores for all players in the room
+            io.to(roomId).emit('updateScores', room.players.map(p => ({ username: p.username, score: p.score })));
+        }
+    });
+
+    socket.on('getLeaderboard', async () => {
+        try {
+            const leaderboard = await User.find({}, 'username correctAnswers gamesPlayed totalPoints')
+                .sort({ totalPoints: -1 })
+                .limit(10);
+            socket.emit('leaderboardData', leaderboard);
+        } catch (error) {
+            console.error('Error fetching leaderboard:', error);
+            socket.emit('leaderboardError', 'Failed to fetch leaderboard data');
         }
     });
 
@@ -166,6 +187,8 @@ async function startGame(roomId) {
         console.log(`Room ${roomId} not found when trying to start game`);
         return;
     }
+
+    room.players.forEach(player => player.score = 0);
 
     try {
         // Fetch 4 random questions from MongoDB
@@ -214,10 +237,13 @@ function startNextQuestion(roomId) {
 
 function completeQuestion(roomId) {
     const room = gameRooms.get(roomId);
-    if (!room) {
-        console.log(`Room ${roomId} not found when trying to complete question`);
-        return;
-    }
+    if (!room) return;
+
+    // Reset answered status for next question
+    room.players.forEach(player => player.answered = false);
+
+    // Emit an event to update scores for all players in the room
+    io.to(roomId).emit('updateScores', room.players.map(p => ({ username: p.username, score: p.score })));
 
     // Clear the question timeout
     if (room.questionTimeout) {

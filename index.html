@@ -117,6 +117,42 @@
             border-radius: 5px;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
         }
+
+        #leaderboardContainer {
+            display: none;
+            max-width: 600px;
+            margin: auto;
+            background: var(--container-bg);
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+
+        #leaderboardTable {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        #leaderboardTable th, #leaderboardTable td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        #leaderboardTable th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+
+        #leaderboardTable tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        #leaderboardTable tr:hover {
+            background-color: #f5f5f5;
+        }
     </style>
 </head>
 <body>
@@ -147,6 +183,22 @@
             <div id="question"></div>
             <div id="options"></div>
             <button id="submitAnswer" style="display:none;">Submit Answer</button>
+            <button onclick="showLeaderboard()">Show Leaderboard</button>
+        </div>
+        <div id="leaderboardContainer">
+            <h2>Leaderboard</h2>
+            <table id="leaderboardTable">
+                <thead>
+                    <tr>
+                        <th>Rank</th>
+                        <th>Username</th>
+                        <th>Correct Answers</th>
+                        <th>Games Played</th>
+                        <th>Total Points</th>
+                    </tr>
+                </thead>
+                <tbody id="leaderboardBody"></tbody>
+            </table>
         </div>
     </div>
 
@@ -167,6 +219,8 @@
         const optionsDiv = document.getElementById('options');
         const submitAnswerBtn = document.getElementById('submitAnswer');
         const countdownTimer = document.getElementById('countdownTimer');
+        const leaderboardContainer = document.getElementById('leaderboardContainer');
+        const leaderboardBody = document.getElementById('leaderboardBody');
 
         let countdownInterval;
 
@@ -185,7 +239,7 @@
             if (selectedOption) {
                 const responseTime = moment().diff(moment(questionStartTime), 'milliseconds');
                 const selectedAnswer = parseInt(selectedOption.value);
-                socket.emit('submitAnswer', { roomId: currentRoomId, answer: selectedAnswer, responseTime });
+                socket.emit('submitAnswer', { roomId: currentRoomId, answer: selectedAnswer, responseTime, username: loggedInUser });
                 submitAnswerBtn.disabled = true;
                 waitingMessage.textContent = 'Waiting for other player to answer...';
                 
@@ -260,6 +314,10 @@
         socket.on('playerLeft', (username) => {
             alert(`${username} left the game. The game will end.`);
             resetGame();
+        });
+
+        socket.on('updateScores', (players) => {
+            updatePlayers(players);
         });
 
         function displayQuestion(question, options, questionNumber, totalQuestions) {
@@ -363,6 +421,30 @@
 
         socket.on('loginFailure', (message) => {
             alert(`Login failed: ${message}`);
+        });
+
+        function showLeaderboard() {
+            socket.emit('getLeaderboard');
+            leaderboardContainer.style.display = 'block';
+        }
+
+        socket.on('leaderboardData', (leaderboard) => {
+            leaderboardBody.innerHTML = '';
+            leaderboard.forEach((user, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${user.username}</td>
+                    <td>${user.correctAnswers}</td>
+                    <td>${user.gamesPlayed}</td>
+                    <td>${user.totalPoints}</td>
+                `;
+                leaderboardBody.appendChild(row);
+            });
+        });
+
+        socket.on('leaderboardError', (message) => {
+            alert(`Error fetching leaderboard: ${message}`);
         });
 
         // Show the login form by default
