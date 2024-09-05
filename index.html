@@ -296,12 +296,29 @@
             }
         });
 
-        socket.on('gameOver', (players) => {
-            const winner = players.reduce((prev, current) => (prev.score > current.score) ? prev : current);
+        socket.on('gameOver', ({ players }) => {
             questionDiv.textContent = 'Game Over!';
             optionsDiv.innerHTML = '';
             submitAnswerBtn.style.display = 'none';
+            
+            // Determine the winner
+            const winner = players.reduce((prev, current) => {
+                if (current.score > prev.score) {
+                    return current;
+                } else if (current.score === prev.score && current.totalResponseTime < prev.totalResponseTime) {
+                    return current;
+                }
+                return prev;
+            });
+
             waitingMessage.textContent = `The winner is ${winner.username} with a score of ${winner.score}!`;
+            
+            // Display final scores and cumulative response times
+            const scoresHtml = players.map(p => 
+                `<p>${p.username}: Score ${p.score}, Total Response Time: ${p.totalResponseTime}ms</p>`
+            ).join('');
+            playersDiv.innerHTML = '<h2>Final Scores:</h2>' + scoresHtml;
+
             joinGameBtn.style.display = 'block';
             clearInterval(countdownInterval);
             countdownTimer.style.display = 'none';
@@ -350,7 +367,9 @@
         }
 
         function updatePlayers(players) {
-            playersDiv.innerHTML = '<h2>Players:</h2>' + players.map(p => `<p>${p.username}: ${p.score}</p>`).join('');
+            playersDiv.innerHTML = '<h2>Players:</h2>' + players.map(p => 
+                `<p>${p.username}: ${p.score} (Total response time: ${p.totalResponseTime || 0}ms)</p>`
+            ).join('');
         }
 
         function resetGame() {

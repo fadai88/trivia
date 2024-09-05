@@ -138,6 +138,7 @@ io.on('connection', (socket) => {
         }
 
         player.answered = true;
+        player.responseTime = responseTime; // Store the response time
 
         if (room.players.every(p => p.answered)) {
             completeQuestion(roomId);
@@ -240,17 +241,23 @@ function completeQuestion(roomId) {
     if (!room) return;
 
     // Reset answered status for next question
-    room.players.forEach(player => player.answered = false);
+    room.players.forEach(player => {
+        player.answered = false;
+        player.totalResponseTime = (player.totalResponseTime || 0) + player.responseTime;
+    });
 
     // Emit an event to update scores for all players in the room
-    io.to(roomId).emit('updateScores', room.players.map(p => ({ username: p.username, score: p.score })));
+    io.to(roomId).emit('updateScores', room.players.map(p => ({ 
+        username: p.username, 
+        score: p.score,
+        responseTime: p.responseTime
+    })));
 
     // Clear the question timeout
     if (room.questionTimeout) {
         clearTimeout(room.questionTimeout);
     }
 
-    io.to(roomId).emit('scoreUpdate', room.players.map(p => ({ username: p.username, score: p.score })));
     room.currentQuestionIndex += 1;
     room.answersReceived = 0;
 
@@ -261,9 +268,28 @@ function completeQuestion(roomId) {
         }, 1000);
     } else {
         console.log(`Game over in room ${roomId}`);
-        io.to(roomId).emit('gameOver', room.players.map(p => ({ username: p.username, score: p.score })));
+        const winner = determineWinner(room.players);
+        io.to(roomId).emit('gameOver', {
+            players: room.players.map(p => ({ 
+                username: p.username, 
+                score: p.score, 
+                totalResponseTime: p.totalResponseTime || 0
+            })),
+            winner: winner
+        });
         gameRooms.delete(roomId);
     }
+}
+
+function determineWinner(players) {
+    const sortedPlayers = players.sort((a, b) => {
+        if (b.score !== a.score) {
+            return b.score - a.score; // Sort by score descending
+        }
+        return a.totalResponseTime - b.totalResponseTime; // If scores are tied, sort by total response time ascending
+    });
+
+    return sortedPlayers[0].username;
 }
 
 const PORT = process.env.PORT || 5000;
