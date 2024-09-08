@@ -7,7 +7,8 @@ const userSchema = new mongoose.Schema({
     password: { type: String, required: true },
     correctAnswers: { type: Number, default: 0 },
     gamesPlayed: { type: Number, default: 0 },
-    totalPoints: { type: Number, default: 0 }
+    totalPoints: { type: Number, default: 0 },
+    virtualBalance: { type: Number, default: 10 } // Start with $10 balance
 });
 
 userSchema.pre('save', async function(next) {

@@ -202,10 +202,10 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.3.2/socket.io.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
     <script>
-        const socket = io('http://localhost:5000');
+        const socket = io();
         let currentRoomId = null;
         let questionStartTime;
         let questionTimer;
@@ -223,15 +223,44 @@
         const leaderboardBody = document.getElementById('leaderboardBody');
 
         let countdownInterval;
+        let virtualBalance = 0;
+
+        function updateBalance() {
+            fetch(`/api/balance/${loggedInUser}`)
+                .then(response => response.json())
+                .then(data => {
+                    virtualBalance = data.balance;
+                    document.getElementById('balanceDisplay').textContent = `Balance: $${virtualBalance.toFixed(2)}`;
+                })
+                .catch(error => console.error('Error fetching balance:', error));
+        }
+
+        socket.on('loginSuccess', (username) => {
+            alert('Login successful!');
+            loggedInUser = username;
+            showGameContainer();
+            updateBalance();
+        });
 
         joinGameBtn.addEventListener('click', () => {
-            if (loggedInUser) {
-                socket.emit('joinGame', loggedInUser);
-                joinGameBtn.style.display = 'none';
-                waitingMessage.textContent = 'Waiting for another player...';
-            } else {
-                alert('Please login to join the game.');
+            if (virtualBalance < 3) {
+                alert('Insufficient balance. You need $3 to join the game.');
+                return;
             }
+            socket.emit('joinGame', loggedInUser);
+            joinGameBtn.style.display = 'none';
+            waitingMessage.textContent = 'Waiting for another player...';
+        });
+
+        socket.on('balanceUpdate', (newBalance) => {
+            virtualBalance = newBalance;
+            document.getElementById('balanceDisplay').textContent = `Balance: $${virtualBalance.toFixed(2)}`;
+        });
+
+        socket.on('joinGameFailure', (message) => {
+            alert(message);
+            joinGameBtn.style.display = 'block';
+            waitingMessage.textContent = '';
         });
 
         submitAnswerBtn.addEventListener('click', () => {
@@ -243,7 +272,6 @@
                 submitAnswerBtn.disabled = true;
                 waitingMessage.textContent = 'Waiting for other player to answer...';
                 
-                // Animate correct/incorrect answer
                 if (selectedAnswer === correctAnswer) {
                     selectedOption.parentElement.classList.add('correct');
                 } else {
@@ -271,7 +299,7 @@
 
         socket.on('nextQuestion', ({ question, options, questionNumber, totalQuestions, questionStartTime: qStartTime, correctAnswerIndex }) => {
             questionStartTime = parseInt(qStartTime);
-            correctAnswer = correctAnswerIndex; // Store the correct answer index
+            correctAnswer = correctAnswerIndex;
             displayQuestion(question, options, questionNumber, totalQuestions);
             submitAnswerBtn.disabled = false;
             submitAnswerBtn.style.display = 'block';
@@ -296,24 +324,22 @@
             }
         });
 
-        socket.on('gameOver', ({ players }) => {
+        socket.on('gameOver', ({ players, winner, winnerBalance }) => {
             questionDiv.textContent = 'Game Over!';
             optionsDiv.innerHTML = '';
             submitAnswerBtn.style.display = 'none';
             
-            // Determine the winner
-            const winner = players.reduce((prev, current) => {
-                if (current.score > prev.score) {
-                    return current;
-                } else if (current.score === prev.score && current.totalResponseTime < prev.totalResponseTime) {
-                    return current;
-                }
-                return prev;
-            });
-
-            waitingMessage.textContent = `The winner is ${winner.username} with a score of ${winner.score}!`;
+            const winnerPlayer = players.find(p => p.username === winner);
+            waitingMessage.textContent = `The winner is ${winner} with a score of ${winnerPlayer.score}!`;
             
-            // Display final scores and cumulative response times
+            if (winner === loggedInUser) {
+                waitingMessage.textContent += ` You won $5.50!`;
+                virtualBalance = winnerBalance;
+                document.getElementById('balanceDisplay').textContent = `Balance: $${virtualBalance.toFixed(2)}`;
+            } else {
+                waitingMessage.textContent += ` You lost $3.`;
+            }
+            
             const scoresHtml = players.map(p => 
                 `<p>${p.username}: Score ${p.score}, Total Response Time: ${p.totalResponseTime}ms</p>`
             ).join('');
@@ -348,7 +374,7 @@
         }
 
         function startCountdown(qStartTime) {
-            const duration = 10; // 10 seconds
+            const duration = 10;
 
             clearInterval(countdownInterval);
 
@@ -411,7 +437,6 @@
             const email = document.getElementById('regEmail').value;
             const password = document.getElementById('regPassword').value;
 
-            // Send registration data to the server
             socket.emit('register', { username, email, password });
         }
 
@@ -419,7 +444,6 @@
             const username = document.getElementById('loginUsername').value;
             const password = document.getElementById('loginPassword').value;
 
-            // Send login data to the server
             socket.emit('login', { username, password });
         }
 
@@ -430,12 +454,6 @@
 
         socket.on('registrationFailure', (message) => {
             alert(`Registration failed: ${message}`);
-        });
-
-        socket.on('loginSuccess', (username) => {
-            alert('Login successful!');
-            loggedInUser = username;
-            showGameContainer();
         });
 
         socket.on('loginFailure', (message) => {
@@ -466,8 +484,24 @@
             alert(`Error fetching leaderboard: ${message}`);
         });
 
-        // Show the login form by default
         showLoginForm();
+
+        const topUpButton = document.createElement('button');
+        topUpButton.id = 'topUpButton';
+        topUpButton.textContent = 'Top Up $10';
+        document.body.appendChild(topUpButton);
+
+        topUpButton.addEventListener('click', async () => {
+            const response = await fetch(`/api/topup/${loggedInUser}`, { method: 'POST' });
+            const data = await response.json();
+            if (data.success) {
+                virtualBalance = data.newBalance;
+                document.getElementById('balanceDisplay').textContent = `Balance: $${virtualBalance.toFixed(2)}`;
+                alert('Successfully topped up $10!');
+            } else {
+                alert('Failed to top up. Please try again.');
+            }
+        });
     </script>
 </body>
 </html>

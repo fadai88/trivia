@@ -3,9 +3,10 @@ const http = require('http');
 const socketIo = require('socket.io');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const path = require('path');
 require('dotenv').config();
 const moment = require('moment');
-const User = require('./models/User'); // Import the User model
+const User = require('./models/User');
 
 const app = express();
 const server = http.createServer(app);
@@ -18,6 +19,7 @@ const io = socketIo(server, {
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
 
 mongoose.connect(process.env.MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
     .then(() => console.log('Connected to MongoDB'))
@@ -64,49 +66,64 @@ io.on('connection', (socket) => {
         }
 
         try {
-            await User.findOneAndUpdate({ username }, { $inc: { gamesPlayed: 1 } });
-        } catch (error) {
-            console.error('Error updating games played:', error);
-        }
-
-        console.log(`${username} (${socket.id}) is trying to join a game`);
-        let roomId;
-        let joinedExistingRoom = false;
-
-        for (const [id, room] of gameRooms.entries()) {
-            if (room.players.length < 2) {
-                roomId = id;
-                joinedExistingRoom = true;
-                break;
+            const user = await User.findOne({ username });
+            if (!user) {
+                socket.emit('joinGameFailure', 'User not found.');
+                return;
             }
-        }
+            if (user.virtualBalance < 3) {
+                socket.emit('joinGameFailure', 'Insufficient virtual balance. You need $3 to join the game.');
+                return;
+            }
+            const updatedUser = await User.findOneAndUpdate(
+                { username }, 
+                { $inc: { gamesPlayed: 1, virtualBalance: -3 } },
+                { new: true }
+            );
+            socket.emit('balanceUpdate', updatedUser.virtualBalance);
 
-        if (!roomId) {
-            roomId = Math.random().toString(36).substring(7);
-            gameRooms.set(roomId, { 
-                players: [], 
-                questions: [], 
-                currentQuestionIndex: 0,
-                answersReceived: 0
-            });
-            console.log(`Created new room: ${roomId}`);
-        }
+            console.log(`${username} (${socket.id}) is trying to join a game`);
+            let roomId;
+            let joinedExistingRoom = false;
 
-        const room = gameRooms.get(roomId);
-        room.players.push({ id: socket.id, username, score: 0 });
+            for (const [id, room] of gameRooms.entries()) {
+                if (room.players.length < 2) {
+                    roomId = id;
+                    joinedExistingRoom = true;
+                    break;
+                }
+            }
 
-        socket.join(roomId);
-        socket.emit('gameJoined', roomId);
+            if (!roomId) {
+                roomId = Math.random().toString(36).substring(7);
+                gameRooms.set(roomId, { 
+                    players: [], 
+                    questions: [], 
+                    currentQuestionIndex: 0,
+                    answersReceived: 0
+                });
+                console.log(`Created new room: ${roomId}`);
+            }
 
-        console.log(`Player ${username} (${socket.id}) joined room ${roomId}`);
-        console.log(`Room ${roomId} now has ${room.players.length} player(s)`);
+            const room = gameRooms.get(roomId);
+            room.players.push({ id: socket.id, username, score: 0 });
 
-        if (room.players.length === 2) {
-            console.log(`Starting game in room ${roomId}`);
-            startGame(roomId);
-        } else if (joinedExistingRoom) {
-            console.log(`Notifying other player in room ${roomId} that ${username} joined`);
-            socket.to(roomId).emit('playerJoined', username);
+            socket.join(roomId);
+            socket.emit('gameJoined', roomId);
+
+            console.log(`Player ${username} (${socket.id}) joined room ${roomId}`);
+            console.log(`Room ${roomId} now has ${room.players.length} player(s)`);
+
+            if (room.players.length === 2) {
+                console.log(`Starting game in room ${roomId}`);
+                startGame(roomId);
+            } else if (joinedExistingRoom) {
+                console.log(`Notifying other player in room ${roomId} that ${username} joined`);
+                socket.to(roomId).emit('playerJoined', username);
+            }
+        } catch (error) {
+            console.error('Error updating user data:', error);
+            socket.emit('joinGameFailure', 'An error occurred. Please try again.');
         }
     });
 
@@ -179,6 +196,55 @@ io.on('connection', (socket) => {
             }
         }
     });
+});
+
+app.post('/login', async (req, res) => {
+    const { username, password } = req.body;
+    try {
+        const user = await User.findOne({ username });
+        if (user && await user.matchPassword(password)) {
+            res.json({ 
+                success: true, 
+                message: 'Login successful', 
+                username: user.username,
+                virtualBalance: user.virtualBalance
+            });
+        } else {
+            res.json({ success: false, message: 'Invalid credentials' });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+app.get('/api/balance/:username', async (req, res) => {
+    try {
+        const user = await User.findOne({ username: req.params.username });
+        if (user) {
+            res.json({ balance: user.virtualBalance });
+        } else {
+            res.status(404).json({ error: 'User not found' });
+        }
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+app.post('/api/topup/:username', async (req, res) => {
+    try {
+        const user = await User.findOneAndUpdate(
+            { username: req.params.username },
+            { $inc: { virtualBalance: 10 } },
+            { new: true }
+        );
+        if (user) {
+            res.json({ success: true, newBalance: user.virtualBalance });
+        } else {
+            res.status(404).json({ success: false, message: 'User not found' });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
 });
 
 async function startGame(roomId) {
@@ -269,14 +335,26 @@ function completeQuestion(roomId) {
     } else {
         console.log(`Game over in room ${roomId}`);
         const winner = determineWinner(room.players);
-        io.to(roomId).emit('gameOver', {
-            players: room.players.map(p => ({ 
-                username: p.username, 
-                score: p.score, 
-                totalResponseTime: p.totalResponseTime || 0
-            })),
-            winner: winner
+        
+        // Update winner's balance
+        User.findOneAndUpdate(
+            { username: winner },
+            { $inc: { virtualBalance: 5.5 } },
+            { new: true }
+        ).then(updatedUser => {
+            io.to(roomId).emit('gameOver', {
+                players: room.players.map(p => ({ 
+                    username: p.username, 
+                    score: p.score, 
+                    totalResponseTime: p.totalResponseTime || 0
+                })),
+                winner: winner,
+                winnerBalance: updatedUser.virtualBalance
+            });
+        }).catch(error => {
+            console.error('Error updating winner balance:', error);
         });
+
         gameRooms.delete(roomId);
     }
 }
