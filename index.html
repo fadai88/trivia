@@ -177,6 +177,13 @@
         <h1>Trivia Game</h1>
         <div id="countdownTimer"></div>
         <div id="gameArea">
+            <select id="betAmount">
+                <option value="3">$3 Game</option>
+                <option value="10">$10 Game</option>
+                <option value="15">$15 Game</option>
+                <option value="20">$20 Game</option>
+                <option value="30">$30 Game</option>
+            </select>
             <button id="joinGameBtn">Join Game</button>
             <div id="waitingMessage"></div>
             <div id="players"></div>
@@ -243,11 +250,12 @@
         });
 
         joinGameBtn.addEventListener('click', () => {
-            if (virtualBalance < 3) {
-                alert('Insufficient balance. You need $3 to join the game.');
+            const betAmount = parseInt(document.getElementById('betAmount').value);
+            if (virtualBalance < betAmount) {
+                alert(`Insufficient balance. You need $${betAmount} to join the game.`);
                 return;
             }
-            socket.emit('joinGame', loggedInUser);
+            socket.emit('joinGame', loggedInUser, betAmount);
             joinGameBtn.style.display = 'none';
             waitingMessage.textContent = 'Waiting for another player...';
         });
@@ -324,34 +332,59 @@
             }
         });
 
-        socket.on('gameOver', ({ players, winner, winnerBalance }) => {
+        socket.on('gameOver', (data) => {
+            console.log('Received game over data:', data);
+            const { players, winner, betAmount, winnerBalance } = data;
             questionDiv.textContent = 'Game Over!';
             optionsDiv.innerHTML = '';
             submitAnswerBtn.style.display = 'none';
             
-            const winnerPlayer = players.find(p => p.username === winner);
-            waitingMessage.textContent = `The winner is ${winner} with a score of ${winnerPlayer.score}!`;
-            
-            if (winner === loggedInUser) {
-                waitingMessage.textContent += ` You won $5.50!`;
-                virtualBalance = winnerBalance;
-                document.getElementById('balanceDisplay').textContent = `Balance: $${virtualBalance.toFixed(2)}`;
+            // Sort players by score, then by response time
+            players.sort((a, b) => b.score - a.score || a.totalResponseTime - b.totalResponseTime);
+
+            if (winner) {
+                const winnerPlayer = players.find(p => p.username === winner);
+                waitingMessage.textContent = `The winner is ${winner} with a score of ${winnerPlayer.score}!`;
+                
+                if (winner === loggedInUser) {
+                    const winnings = betAmount ? parseFloat(betAmount) * 1.8 : 0;
+                    waitingMessage.textContent += ` You won $${winnings.toFixed(2)}!`;
+                    virtualBalance = winnerBalance || virtualBalance + winnings;
+                } else {
+                    waitingMessage.textContent += ` You lost $${betAmount || 0}.`;
+                    virtualBalance -= betAmount ? parseFloat(betAmount) : 0;
+                }
             } else {
-                waitingMessage.textContent += ` You lost $3.`;
+                // Handle draw scenario
+                if (players[0].score === players[1].score) {
+                    if (players[0].totalResponseTime < players[1].totalResponseTime) {
+                        waitingMessage.textContent = `It's a draw based on score! ${players[0].username} wins due to faster total response time (${players[0].totalResponseTime}ms vs ${players[1].totalResponseTime}ms).`;
+                    } else if (players[0].totalResponseTime > players[1].totalResponseTime) {
+                        waitingMessage.textContent = `It's a draw based on score! ${players[1].username} wins due to faster total response time (${players[1].totalResponseTime}ms vs ${players[0].totalResponseTime}ms).`;
+                    } else {
+                        waitingMessage.textContent = "It's a perfect draw! Both players had the same score and response time.";
+                    }
+                    
+                    // Update balance based on who won the tiebreaker
+                    const tiebreakWinner = players[0].totalResponseTime <= players[1].totalResponseTime ? players[0].username : players[1].username;
+                    if (tiebreakWinner === loggedInUser) {
+                        const winnings = betAmount ? parseFloat(betAmount) * 1.8 : 0;
+                        waitingMessage.textContent += ` You won $${winnings.toFixed(2)}!`;
+                        virtualBalance += winnings;
+                    } else {
+                        waitingMessage.textContent += ` You lost $${betAmount || 0}.`;
+                        virtualBalance -= betAmount ? parseFloat(betAmount) : 0;
+                    }
+                }
             }
+            document.getElementById('balanceDisplay').textContent = `Balance: $${virtualBalance.toFixed(2)}`;
             
             const scoresHtml = players.map(p => 
-                `<p>${p.username}: Score ${p.score}, Total Response Time: ${p.totalResponseTime}ms</p>`
+                `<p>${p.username}: ${p.score} (Total response time: ${p.totalResponseTime}ms)</p>`
             ).join('');
             playersDiv.innerHTML = '<h2>Final Scores:</h2>' + scoresHtml;
 
-            joinGameBtn.style.display = 'block';
-            clearInterval(countdownInterval);
-            countdownTimer.style.display = 'none';
-            if (questionTimer) {
-                clearTimeout(questionTimer);
-            }
-            clearInterval(countdownInterval);
+            joinGameBtn.style.display = 'inline-block';
         });
 
         socket.on('playerLeft', (username) => {

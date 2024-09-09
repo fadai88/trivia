@@ -59,7 +59,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('joinGame', async (username) => {
+    socket.on('joinGame', async (username, betAmount) => {
         if (!username) {
             socket.emit('joinGameFailure', 'You must be logged in to join the game.');
             return;
@@ -71,13 +71,13 @@ io.on('connection', (socket) => {
                 socket.emit('joinGameFailure', 'User not found.');
                 return;
             }
-            if (user.virtualBalance < 3) {
-                socket.emit('joinGameFailure', 'Insufficient virtual balance. You need $3 to join the game.');
+            if (user.virtualBalance < betAmount) {
+                socket.emit('joinGameFailure', `Insufficient virtual balance. You need $${betAmount} to join the game.`);
                 return;
             }
             const updatedUser = await User.findOneAndUpdate(
                 { username }, 
-                { $inc: { gamesPlayed: 1, virtualBalance: -3 } },
+                { $inc: { gamesPlayed: 1, virtualBalance: -betAmount } },
                 { new: true }
             );
             socket.emit('balanceUpdate', updatedUser.virtualBalance);
@@ -87,7 +87,7 @@ io.on('connection', (socket) => {
             let joinedExistingRoom = false;
 
             for (const [id, room] of gameRooms.entries()) {
-                if (room.players.length < 2) {
+                if (room.players.length < 2 && room.betAmount === betAmount) {
                     roomId = id;
                     joinedExistingRoom = true;
                     break;
@@ -100,7 +100,8 @@ io.on('connection', (socket) => {
                     players: [], 
                     questions: [], 
                     currentQuestionIndex: 0,
-                    answersReceived: 0
+                    answersReceived: 0,
+                    betAmount: betAmount
                 });
                 console.log(`Created new room: ${roomId}`);
             }
@@ -134,6 +135,8 @@ io.on('connection', (socket) => {
         const player = room.players.find(p => p.username === username);
         if (!player) return;
 
+        player.totalResponseTime = (player.totalResponseTime || 0) + responseTime;
+
         const currentQuestion = room.questions[room.currentQuestionIndex];
         const isCorrect = answer === currentQuestion.correctAnswer;
 
@@ -155,7 +158,6 @@ io.on('connection', (socket) => {
         }
 
         player.answered = true;
-        player.responseTime = responseTime; // Store the response time
 
         if (room.players.every(p => p.answered)) {
             completeQuestion(roomId);
@@ -309,14 +311,13 @@ function completeQuestion(roomId) {
     // Reset answered status for next question
     room.players.forEach(player => {
         player.answered = false;
-        player.totalResponseTime = (player.totalResponseTime || 0) + player.responseTime;
     });
 
     // Emit an event to update scores for all players in the room
     io.to(roomId).emit('updateScores', room.players.map(p => ({ 
         username: p.username, 
         score: p.score,
-        responseTime: p.responseTime
+        totalResponseTime: p.totalResponseTime || 0
     })));
 
     // Clear the question timeout
@@ -336,10 +337,21 @@ function completeQuestion(roomId) {
         console.log(`Game over in room ${roomId}`);
         const winner = determineWinner(room.players);
         
+        // Log the values we're about to send
+        console.log('Game over data:', {
+            players: room.players.map(p => ({ 
+                username: p.username, 
+                score: p.score, 
+                totalResponseTime: p.totalResponseTime || 0
+            })),
+            winner: winner,
+            betAmount: room.betAmount
+        });
+
         // Update winner's balance
         User.findOneAndUpdate(
             { username: winner },
-            { $inc: { virtualBalance: 5.5 } },
+            { $inc: { virtualBalance: room.betAmount * 1.8 } },
             { new: true }
         ).then(updatedUser => {
             io.to(roomId).emit('gameOver', {
@@ -349,6 +361,7 @@ function completeQuestion(roomId) {
                     totalResponseTime: p.totalResponseTime || 0
                 })),
                 winner: winner,
+                betAmount: room.betAmount,
                 winnerBalance: updatedUser.virtualBalance
             });
         }).catch(error => {
