@@ -191,6 +191,7 @@
             <div id="options"></div>
             <button id="submitAnswer" style="display:none;">Submit Answer</button>
             <button onclick="showLeaderboard()">Show Leaderboard</button>
+            <button id="inviteFriendsBtn">Invite Friends</button>
         </div>
         <div id="leaderboardContainer">
             <h2>Leaderboard</h2>
@@ -258,7 +259,22 @@
             socket.emit('joinGame', loggedInUser, betAmount);
             joinGameBtn.style.display = 'none';
             waitingMessage.textContent = 'Waiting for another player...';
+
+            // New logic to check for AI opponent
+            setTimeout(() => {
+                if (!currentRoomId) {
+                    startAIGame(betAmount); // Start game with AI if no second player
+                }
+            }, 30000); // Wait for 30 seconds before starting AI game
         });
+
+        // New function to start game with AI
+        function startAIGame(betAmount) {
+            currentRoomId = 'AI'; // Set a unique room ID for AI game
+            waitingMessage.textContent = 'No second player found. Starting game with AI...';
+            // Logic to initialize AI opponent (e.g., fetch AI question and options)
+            socket.emit('startAIGame', { username: loggedInUser, betAmount });
+        }
 
         socket.on('balanceUpdate', (newBalance) => {
             virtualBalance = newBalance;
@@ -351,7 +367,7 @@
                     waitingMessage.textContent += ` You won $${winnings.toFixed(2)}!`;
                     virtualBalance = winnerBalance || virtualBalance + winnings;
                 } else {
-                    waitingMessage.textContent += ` You lost $${betAmount || 0}.`;
+                    waitingMessage.textContent += ` Better luck next time! Thanks for playing!`;
                     virtualBalance -= betAmount ? parseFloat(betAmount) : 0;
                 }
             } else {
@@ -534,6 +550,12 @@
             } else {
                 alert('Failed to top up. Please try again.');
             }
+        });
+
+        document.getElementById('inviteFriendsBtn').addEventListener('click', () => {
+            const roomId = currentRoomId; // Get the current room ID
+            const inviteLink = `${window.location.origin}/join?roomId=${roomId}`;
+            prompt("Share this link with your friends:", inviteLink);
         });
     </script>
 </body>

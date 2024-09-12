@@ -95,7 +95,7 @@ io.on('connection', (socket) => {
             }
 
             if (!roomId) {
-                roomId = Math.random().toString(36).substring(7);
+                roomId = generateRoomId(); // Function to generate a unique room ID
                 gameRooms.set(roomId, { 
                     players: [], 
                     questions: [], 
@@ -122,6 +122,9 @@ io.on('connection', (socket) => {
                 console.log(`Notifying other player in room ${roomId} that ${username} joined`);
                 socket.to(roomId).emit('playerJoined', username);
             }
+
+            // Send the room ID back to the player
+            socket.emit('roomId', roomId);
         } catch (error) {
             console.error('Error updating user data:', error);
             socket.emit('joinGameFailure', 'An error occurred. Please try again.');
@@ -385,3 +388,29 @@ function determineWinner(players) {
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+// New function to start AI game
+function startAIGame(username, betAmount) {
+    const aiUsername = 'AI_Opponent'; // Define AI opponent username
+    const roomId = 'AI'; // Unique room ID for AI game
+
+    // Notify players about the AI game
+    io.to(roomId).emit('gameStart', {
+        players: [username, aiUsername],
+        questionCount: 10 // Set the number of questions for the game
+    });
+
+    // Logic to fetch and send questions to the player and AI
+    // You will need to implement AI question-answering logic here
+}
+
+// Function to generate a unique room ID
+function generateRoomId() {
+    return Math.random().toString(36).substring(7);
+}
+
+app.get('/join', (req, res) => {
+    const roomId = req.query.roomId;
+    // Logic to add the player to the specified room
+    // ...
+});
