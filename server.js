@@ -123,6 +123,9 @@ io.on('connection', (socket) => {
                 socket.to(roomId).emit('playerJoined', username);
             }
 
+            // Notify all players in the lobby
+            socket.broadcast.emit('playerJoined', username);
+
             // Send the room ID back to the player
             socket.emit('roomId', roomId);
         } catch (error) {
@@ -263,7 +266,7 @@ async function startGame(roomId) {
     room.players.forEach(player => player.score = 0);
 
     try {
-        // Fetch 4 random questions from MongoDB
+        // Fetch 7 random questions from MongoDB
         room.questions = await Quiz.aggregate([{ $sample: { size: 7 } }]);
         console.log(`Fetched ${room.questions.length} questions for room ${roomId}`);
         io.to(roomId).emit('gameStart', { players: room.players, questionCount: room.questions.length });
@@ -304,7 +307,7 @@ function startNextQuestion(roomId) {
     // Set a new timeout for this question
     room.questionTimeout = setTimeout(() => {
         completeQuestion(roomId);
-    }, 10000); // 30 seconds for each question
+    }, 10000); // 10 seconds for each question
 }
 
 function completeQuestion(roomId) {
@@ -397,7 +400,7 @@ function startAIGame(username, betAmount) {
     // Notify players about the AI game
     io.to(roomId).emit('gameStart', {
         players: [username, aiUsername],
-        questionCount: 10 // Set the number of questions for the game
+        questionCount: 7 // Set the number of questions for the game
     });
 
     // Logic to fetch and send questions to the player and AI

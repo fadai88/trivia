@@ -210,6 +210,9 @@
         </div>
     </div>
 
+    <div id="notification" style="display: none; background-color: #f0f0f0; padding: 10px; margin: 10px 0;"></div>
+    <audio id="joinSound" src="assets/button-7.mp3" preload="auto"></audio>
+
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
     <script>
@@ -556,6 +559,34 @@
             const roomId = currentRoomId; // Get the current room ID
             const inviteLink = `${window.location.origin}/join?roomId=${roomId}`;
             prompt("Share this link with your friends:", inviteLink);
+        });
+
+        const joinSound = document.getElementById('joinSound');
+        const notification = document.getElementById('notification');
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const joinSound = document.getElementById('joinSound');
+            const socket = io(); // Initialize the socket connection
+            const notification = document.getElementById('notification');
+
+            socket.on('playerJoined', (username) => {
+                // Show a notification instead of an alert
+                notification.textContent = `${username} has joined the lobby!`;
+                notification.style.display = 'block';
+
+                // Play the sound notification
+                joinSound.play();
+
+                // Optionally hide the notification after a few seconds
+                setTimeout(() => {
+                    notification.style.display = 'none';
+                }, 3000); // Hide after 3 seconds
+            });
+
+            // Logic to display questions immediately
+            socket.on('startGame', () => {
+                // Code to display questions goes here
+            });
         });
     </script>
 </body>
